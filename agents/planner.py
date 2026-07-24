@@ -1,4 +1,6 @@
+import json
 import os
+import re
 from typing import List
 from pydantic import BaseModel, Field
 from graph.state import AgentState
@@ -22,6 +24,36 @@ def load_planner_prompt() -> str:
         return f.read()
 
 
+def _call_gemini(prompt: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        raise RuntimeError("google-genai package is not installed") from exc
+
+    client = genai.Client(api_key=api_key)
+    config = types.GenerateContentConfig(temperature=0)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=config,
+    )
+    return getattr(response, "text", "") or ""
+
+
+def _extract_json_payload(raw_output: str) -> dict:
+    cleaned = raw_output.strip()
+    if "```" in cleaned:
+        match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+    return json.loads(cleaned)
+
+
 def planner_node(state: AgentState) -> dict:
     print("[planner_node] Generating structured plan using Pydantic schema...")
     issue = state.get("issue", {})
@@ -42,15 +74,37 @@ def planner_node(state: AgentState) -> dict:
         .replace("{code_context}", str(code_context_str))
     )
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        from langchain_openai import ChatOpenAI
-
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        structured_llm = llm.with_structured_output(PlanOutput)
-        plan_output: PlanOutput = structured_llm.invoke(formatted_prompt)
+        try:
+            gemini_prompt = (
+                f"{formatted_prompt}\n\n"
+                "Return valid JSON only with this structure: "
+                '{"analysis": "...", "is_complex": true, "steps": ["..."]}'
+            )
+            raw_output = _call_gemini(gemini_prompt)
+            payload = _extract_json_payload(raw_output)
+            plan_output = PlanOutput.model_validate(payload)
+        except Exception as exc:
+            print(
+                f"[planner_node] Gemini request failed: {exc}. Using structured Pydantic fallback mode."
+            )
+            is_complex = (
+                len(code_context_list) > 2
+                or "refactor" in str(issue_title).lower()
+                or "architecture" in str(issue_body).lower()
+            )
+            plan_output = PlanOutput(
+                analysis=f"Analysis for: {issue_title}",
+                is_complex=is_complex,
+                steps=[
+                    f"1. Examine context files ({len(code_context_list)} files identified).",
+                    f"2. Apply fix for issue: '{issue_title}'.",
+                    "3. Write pytest unit tests to verify the fix.",
+                ],
+            )
     else:
-        print("[planner_node] OPENAI_API_KEY not set. Using structured Pydantic fallback mode.")
+        print("[planner_node] GEMINI_API_KEY not set. Using structured Pydantic fallback mode.")
         is_complex = (
             len(code_context_list) > 2
             or "refactor" in str(issue_title).lower()

@@ -1,5 +1,9 @@
 import argparse
 import sys
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from graph.workflow import build_graph
 
 

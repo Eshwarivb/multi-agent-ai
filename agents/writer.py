@@ -34,6 +34,27 @@ def clean_patch_output(raw_output: str) -> str:
     return raw_output.strip()
 
 
+def _call_gemini_for_patch(prompt: str) -> str:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY not set")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except ImportError as exc:
+        raise RuntimeError("google-genai package is not installed") from exc
+
+    client = genai.Client(api_key=api_key)
+    config = types.GenerateContentConfig(temperature=0)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=config,
+    )
+    return getattr(response, "text", "") or ""
+
+
 def code_writer_node(state: AgentState) -> dict:
     print("[code_writer_node] Generating unified diff patch for code modification...")
     issue = state.get("issue", {})
@@ -61,15 +82,32 @@ def code_writer_node(state: AgentState) -> dict:
         .replace("{test_results_output}", str(test_output))
     )
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        from langchain_openai import ChatOpenAI
+        try:
+            raw_patch = _call_gemini_for_patch(formatted_prompt)
+            patch = clean_patch_output(str(raw_patch))
+        except Exception as exc:
+            print(
+                f"[code_writer_node] Gemini request failed: {exc}. Using unified diff fallback generator."
+            )
+            target_file = "calculator.py"
+            if code_context_list:
+                match = re.search(r"File:\s*([^\n]+)", code_context_list[0])
+                if match:
+                    target_file = match.group(1).strip()
 
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-        raw_patch = llm.invoke(formatted_prompt).content
-        patch = clean_patch_output(str(raw_patch))
+            patch = (
+                f"--- a/{target_file}\n"
+                f"+++ b/{target_file}\n"
+                "@@ -1,5 +1,7 @@\n"
+                " def calculate(a, b):\n"
+                "+    if b == 0:\n"
+                "+        raise ValueError('Division by zero')\n"
+                "     return a / b\n"
+            )
     else:
-        print("[code_writer_node] OPENAI_API_KEY not set. Using unified diff fallback generator.")
+        print("[code_writer_node] GEMINI_API_KEY not set. Using unified diff fallback generator.")
         target_file = "calculator.py"
         if code_context_list:
             match = re.search(r"File:\s*([^\n]+)", code_context_list[0])

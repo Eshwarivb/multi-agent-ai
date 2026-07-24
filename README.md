@@ -52,7 +52,7 @@ flowchart TD
 ### Prerequisites
 - Python 3.11+
 - Docker Desktop (optional, automatic fallback to isolated temp sandbox)
-- OpenAI API Key (optional, fallback structured mode available)
+- Gemini API Key (optional, fallback structured mode available)
 - GitHub Token (optional, fallback PR URL generator available)
 
 ### Installation
