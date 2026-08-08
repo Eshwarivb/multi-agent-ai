@@ -3,6 +3,8 @@
 ## 1. Overview (What + Why)
 A production-grade multi-agent AI system built with LangGraph, Docker, PyGithub, and Pydantic that automatically resolves GitHub issues by analyzing repository context, formulating structured resolution plans, generating unified diff patches, running pytest inside isolated Docker sandboxes, retrying on test failures, and opening Pull Requests autonomously.
 
+The architecture is **LLM-provider independent**. Currently, it is configured to use **Groq** via LangChain's `ChatGroq`.
+
 ## 2. Architecture Diagram
 
 ```mermaid
@@ -52,7 +54,7 @@ flowchart TD
 ### Prerequisites
 - Python 3.11+
 - Docker Desktop (optional, automatic fallback to isolated temp sandbox)
-- Gemini API Key (optional, fallback structured mode available)
+- Groq API Key (required, set in `.env` as `GROQ_API_KEY`)
 - GitHub Token (optional, fallback PR URL generator available)
 
 ### Installation

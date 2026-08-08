@@ -15,6 +15,10 @@ WHY UNIFIED DIFFS ARE THE RIGHT FORMAT HERE:
 import os
 import re
 from graph.state import AgentState
+from langchain_core.messages import HumanMessage, SystemMessage
+
+# Import the centralized LLM instance getter
+from agents.llm import get_llm
 
 
 def load_writer_prompt() -> str:
@@ -32,27 +36,6 @@ def clean_patch_output(raw_output: str) -> str:
         if match:
             return match.group(1).strip()
     return raw_output.strip()
-
-
-def _call_gemini_for_patch(prompt: str) -> str:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY not set")
-
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError as exc:
-        raise RuntimeError("google-genai package is not installed") from exc
-
-    client = genai.Client(api_key=api_key)
-    config = types.GenerateContentConfig(temperature=0)
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=config,
-    )
-    return getattr(response, "text", "") or ""
 
 
 def code_writer_node(state: AgentState) -> dict:
@@ -82,14 +65,20 @@ def code_writer_node(state: AgentState) -> dict:
         .replace("{test_results_output}", str(test_output))
     )
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if api_key:
         try:
-            raw_patch = _call_gemini_for_patch(formatted_prompt)
+            llm = get_llm()
+            messages = [
+                SystemMessage(content="You are an expert software engineer. Follow the plan and generate a valid unified diff patch."),
+                HumanMessage(content=formatted_prompt)
+            ]
+            response = llm.invoke(messages)
+            raw_patch = getattr(response, "content", "") or ""
             patch = clean_patch_output(str(raw_patch))
         except Exception as exc:
             print(
-                f"[code_writer_node] Gemini request failed: {exc}. Using unified diff fallback generator."
+                f"[code_writer_node] Groq request failed: {exc}. Using unified diff fallback generator."
             )
             target_file = "calculator.py"
             if code_context_list:
@@ -107,7 +96,7 @@ def code_writer_node(state: AgentState) -> dict:
                 "     return a / b\n"
             )
     else:
-        print("[code_writer_node] GEMINI_API_KEY not set. Using unified diff fallback generator.")
+        print("[code_writer_node] GROQ_API_KEY not set. Using unified diff fallback generator.")
         target_file = "calculator.py"
         if code_context_list:
             match = re.search(r"File:\s*([^\n]+)", code_context_list[0])
