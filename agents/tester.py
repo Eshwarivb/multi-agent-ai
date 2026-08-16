@@ -20,6 +20,7 @@ def test_writer_node(state: AgentState) -> dict:
     print(
         f"[test_writer_node] Test execution complete. Passed={results['passed']}, RetryCount={new_retry}"
     )
+    print(f"[test_writer_node] Test output:\n{results.get('output')}")
 
     return {"test_results": results, "retry_count": new_retry}
 

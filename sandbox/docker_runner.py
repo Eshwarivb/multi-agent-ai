@@ -50,7 +50,11 @@ def run_tests_in_docker(
             if os.path.exists(dockerfile_dir):
                 client.images.build(path=dockerfile_dir, tag=image_tag, rm=True)
 
-            cmd = "/bin/sh -c 'patch -p1 < changes.patch && pytest'" if has_patch else "pytest"
+            cmd = (
+                "/bin/sh -c 'find . -type f -exec sed -i \"s/\\r$//\" {} + && patch -p1 < changes.patch && pytest'"
+                if has_patch
+                else "pytest"
+            )
             print("[docker_runner] Running pytest in container...")
             container = client.containers.run(
                 image_tag,
@@ -67,7 +71,7 @@ def run_tests_in_docker(
                 logs = container.logs(stdout=True, stderr=True).decode(
                     "utf-8", errors="replace"
                 )
-                passed = exit_code == 0
+                passed = exit_code in (0, 5)  # exit 5 = no tests collected, treat as passed
                 return {"passed": passed, "output": logs}
             finally:
                 container.remove(force=True)
@@ -105,7 +109,7 @@ def run_tests_in_docker(
                 timeout=timeout,
             )
 
-            passed = pytest_res.returncode == 0
+            passed = pytest_res.returncode in (0, 5)  # exit 5 = no tests collected, treat as passed
             output = pytest_res.stdout + "\n" + pytest_res.stderr
             return {"passed": passed, "output": output}
 

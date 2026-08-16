@@ -1,4 +1,6 @@
+import json
 import os
+import re
 from typing import List
 from pydantic import BaseModel, Field
 from graph.state import AgentState
@@ -25,6 +27,15 @@ def load_planner_prompt() -> str:
     with open(prompt_path, "r", encoding="utf-8") as f:
         return f.read()
 
+def _extract_json_payload(raw_output: str) -> dict:
+    """Extract JSON from LLM response, stripping markdown code fences if present."""
+    cleaned = raw_output.strip()
+    if "```" in cleaned:
+        match = re.search(r"```(?:json)?\s*(.*?)```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+    return json.loads(cleaned)
+
 
 def planner_node(state: AgentState) -> dict:
     print("[planner_node] Generating structured plan using Pydantic schema...")
@@ -50,14 +61,19 @@ def planner_node(state: AgentState) -> dict:
     if api_key:
         try:
             llm = get_llm()
-            structured_llm = llm.with_structured_output(PlanOutput)
-            
+            groq_prompt = (
+                f"{formatted_prompt}\n\n"
+                "Return valid JSON only with this exact structure (use JSON booleans true/false, not Python True/False): "
+                '{"analysis": "...", "is_complex": false, "steps": ["step1", "step2"]}'
+            )
             messages = [
-                SystemMessage(content="You are an expert software architect. Analyze the issue and provide a structured implementation plan."),
-                HumanMessage(content=formatted_prompt)
+                SystemMessage(content="You are an expert software architect. Analyze the issue and return a structured JSON plan. Return ONLY valid JSON, no other text."),
+                HumanMessage(content=groq_prompt)
             ]
-            
-            plan_output = structured_llm.invoke(messages)
+            response = llm.invoke(messages)
+            raw_output = getattr(response, "content", "") or ""
+            payload = _extract_json_payload(raw_output)
+            plan_output = PlanOutput.model_validate(payload)
         except Exception as exc:
             print(
                 f"[planner_node] Groq request failed: {exc}. Using structured Pydantic fallback mode."

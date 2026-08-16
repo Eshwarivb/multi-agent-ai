@@ -103,21 +103,57 @@ def create_branch_and_pr(
 
             # Create a patch commit record on the branch if patch exists
             if patch_content.strip():
-                patch_path = "AUTOMATED_FIX.patch"
+                match = re.search(r"\+\+\+\s+b/(.*)", patch_content)
+                target_file = match.group(1).strip() if match else "AUTOMATED_FIX.patch"
+
+                if target_file != "AUTOMATED_FIX.patch":
+                    try:
+                        contents = repo.get_contents(target_file, ref=main_ref.object.sha)
+                        original_code = contents.decoded_content.decode("utf-8").replace("\r\n", "\n")
+
+                        # Simple python hunk applicator
+                        old_lines, new_lines = [], []
+                        in_hunk = False
+                        for line in patch_content.splitlines():
+                            if line.startswith("@@"):
+                                in_hunk = True
+                                continue
+                            if in_hunk:
+                                if line.startswith("-"): old_lines.append(line[1:])
+                                elif line.startswith("+"): new_lines.append(line[1:])
+                                elif line.startswith(" ") or line == "":
+                                    old_lines.append(line[1:] if line else "")
+                                    new_lines.append(line[1:] if line else "")
+                        
+                        old_text = "\n".join(old_lines)
+                        new_text = "\n".join(new_lines)
+                        
+                        updated_code = original_code.replace(old_text, new_text)
+                        
+                        if updated_code == original_code:
+                            target_file = "AUTOMATED_FIX.patch"
+                            updated_code = patch_content
+                    except Exception as parse_e:
+                        print(f"Failed to parse or apply patch: {parse_e}")
+                        target_file = "AUTOMATED_FIX.patch"
+                        updated_code = patch_content
+                else:
+                    updated_code = patch_content
+
                 try:
-                    contents = repo.get_contents(patch_path, ref=branch_name)
+                    contents = repo.get_contents(target_file, ref=branch_name)
                     repo.update_file(
-                        path=patch_path,
-                        message=f"fix: update automated patch for issue #{issue_num}",
-                        content=patch_content,
+                        path=target_file,
+                        message=f"fix: update {target_file} for issue #{issue_num}",
+                        content=updated_code,
                         sha=contents.sha,
                         branch=branch_name,
                     )
                 except Exception:
                     repo.create_file(
-                        path=patch_path,
-                        message=f"fix: automated patch for issue #{issue_num}",
-                        content=patch_content,
+                        path=target_file,
+                        message=f"fix: update {target_file} for issue #{issue_num}",
+                        content=updated_code,
                         branch=branch_name,
                     )
 

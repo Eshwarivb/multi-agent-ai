@@ -34,8 +34,8 @@ def clean_patch_output(raw_output: str) -> str:
     if "```" in raw_output:
         match = re.search(r"```(?:diff)?\n(.*?)```", raw_output, re.DOTALL)
         if match:
-            return match.group(1).strip()
-    return raw_output.strip()
+            return match.group(1).strip() + "\n"
+    return raw_output.strip() + "\n"
 
 
 def code_writer_node(state: AgentState) -> dict:
@@ -114,4 +114,5 @@ def code_writer_node(state: AgentState) -> dict:
         )
 
     print(f"[code_writer_node] Patch generated ({len(patch.splitlines())} diff lines).")
+    print(f"[code_writer_node] Generated patch content:\n{patch}")
     return {"patch": patch}
